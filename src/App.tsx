@@ -5,7 +5,7 @@ import {
   Eye, Filter, LayoutDashboard, LineChart, ListFilter, LoaderCircle, Menu,
   Search, Settings2, ShieldAlert, SlidersHorizontal, Sparkles, Wallet,
   X, GraduationCap, Radar, TriangleAlert, Crosshair, Gauge,
-  CandlestickChart, SlidersHorizontal as SlidersIcon, Bot, Scale,
+  CandlestickChart, SlidersHorizontal as SlidersIcon, Bot, Scale, Palette,
 } from 'lucide-react'
 import type { Token } from './market'
 import { useMarketStore } from './store'
@@ -24,12 +24,26 @@ type ResearchPreferences = {
   showRangeLevels: boolean
 }
 
+type UiPreferences = {
+  accent: 'ice' | 'violet' | 'cyan'
+  glass: 'subtle' | 'balanced' | 'rich'
+  density: 'comfortable' | 'compact'
+  motion: 'system' | 'full' | 'reduced'
+}
+
 const defaultResearchPreferences: ResearchPreferences = {
   timeframe: '15m',
   beginnerMode: true,
   showSma20: true,
   showSma50: true,
   showRangeLevels: true,
+}
+
+const defaultUiPreferences: UiPreferences = {
+  accent: 'ice',
+  glass: 'balanced',
+  density: 'comfortable',
+  motion: 'system',
 }
 
 function readResearchPreferences(): ResearchPreferences {
@@ -45,6 +59,20 @@ function readResearchPreferences(): ResearchPreferences {
     }
   } catch {
     return defaultResearchPreferences
+  }
+}
+
+function readUiPreferences(): UiPreferences {
+  try {
+    const saved = JSON.parse(localStorage.getItem('memescan-ui-preferences') ?? '{}') as Partial<UiPreferences>
+    return {
+      accent: saved.accent === 'violet' || saved.accent === 'cyan' ? saved.accent : defaultUiPreferences.accent,
+      glass: saved.glass === 'subtle' || saved.glass === 'rich' ? saved.glass : defaultUiPreferences.glass,
+      density: saved.density === 'compact' ? saved.density : defaultUiPreferences.density,
+      motion: saved.motion === 'full' || saved.motion === 'reduced' ? saved.motion : defaultUiPreferences.motion,
+    }
+  } catch {
+    return defaultUiPreferences
   }
 }
 
@@ -106,6 +134,7 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false)
   const [toast, setToast] = useState('')
   const [researchPreferences, setResearchPreferences] = useState(readResearchPreferences)
+  const [uiPreferences, setUiPreferences] = useState(readUiPreferences)
   const previousPrices = useRef(new Map<string, number>())
 
   function updateResearchPreferences(patch: Partial<ResearchPreferences>) {
@@ -115,6 +144,16 @@ function App() {
       localStorage.setItem('memescan-research-preferences', JSON.stringify(next))
     } catch {
       setToast('Could not save research preferences in this browser')
+    }
+  }
+
+  function updateUiPreferences(patch: Partial<UiPreferences>) {
+    const next = { ...uiPreferences, ...patch }
+    setUiPreferences(next)
+    try {
+      localStorage.setItem('memescan-ui-preferences', JSON.stringify(next))
+    } catch {
+      setToast('Could not save interface preferences in this browser')
     }
   }
 
@@ -173,7 +212,7 @@ function App() {
     : 'Waiting for feed'
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-accent={uiPreferences.accent} data-glass={uiPreferences.glass} data-density={uiPreferences.density} data-motion={uiPreferences.motion}>
       {mobileNav && <button className="mobile-backdrop" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
       <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
         <div className="brand">
@@ -237,10 +276,10 @@ function App() {
           {section === 'training' && <TrainingPage tokens={tokens} analysisNow={updatedAt ?? 0} preferences={researchPreferences} onToast={setToast} onNavigatePaper={() => setSection('paper')} />}
           {section === 'ai' && <AiPage tokens={tokens} analysisNow={updatedAt ?? 0} preferences={researchPreferences} onSelect={setSelectedToken} />}
           {section === 'paper' && <PaperTrading tokens={tokens} onToast={setToast} />}
-          {section === 'settings' && <SettingsPage refreshSeconds={refreshSeconds} setRefreshSeconds={setRefreshSeconds} preferences={researchPreferences} onPreferencesChange={updateResearchPreferences} />}
+          {section === 'settings' && <SettingsPage refreshSeconds={refreshSeconds} setRefreshSeconds={setRefreshSeconds} preferences={researchPreferences} uiPreferences={uiPreferences} onPreferencesChange={updateResearchPreferences} onUiPreferencesChange={updateUiPreferences} />}
         </div>
       </main>
-      {selectedToken && <TokenDialog token={selectedToken} onClose={() => setSelectedToken(null)} onToast={setToast} onOpenPaper={() => { setSelectedToken(null); setSection('paper') }} />}
+      {selectedToken && <TokenDialog token={selectedToken} indicators={researchPreferences} onClose={() => setSelectedToken(null)} onToast={setToast} onOpenPaper={() => { setSelectedToken(null); setSection('paper') }} />}
       {toast && <div className="toast"><Check size={15} />{toast}</div>}
     </div>
   )
@@ -841,16 +880,27 @@ function PaperTrading({ tokens, onToast }: { tokens: Token[]; onToast: (message:
   </>
 }
 
-function SettingsPage({ refreshSeconds, setRefreshSeconds, preferences, onPreferencesChange }: {
+function SettingsPage({ refreshSeconds, setRefreshSeconds, preferences, uiPreferences, onPreferencesChange, onUiPreferencesChange }: {
   refreshSeconds: number
   setRefreshSeconds: (value: number) => void
   preferences: ResearchPreferences
+  uiPreferences: UiPreferences
   onPreferencesChange: (patch: Partial<ResearchPreferences>) => void
+  onUiPreferencesChange: (patch: Partial<UiPreferences>) => void
 }) {
+  const prefersReducedMotion = uiPreferences.motion === 'reduced'
+    || (uiPreferences.motion === 'system' && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const scrollBehavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth'
   return <>
     <PageHeading eyebrow="PREFERENCES" title="Your workspace." description="Research defaults are saved in this browser. No API credentials are stored in the browser." />
-    <div className="settings-layout"><div className="settings-nav"><button className="settings-nav-active" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}><Settings2 size={15} />General</button><button onClick={() => document.getElementById('market-settings')?.scrollIntoView({ behavior: 'smooth' })}><Activity size={15} />Market data</button><button onClick={() => document.getElementById('research-settings')?.scrollIntoView({ behavior: 'smooth' })}><LineChart size={15} />Research</button><button onClick={() => document.getElementById('provider-settings')?.scrollIntoView({ behavior: 'smooth' })}><Sparkles size={15} />AI providers</button></div>
-      <div className="settings-main"><section className="panel settings-section" id="market-settings"><div className="settings-section-head"><div><h2>Market data</h2><p>Public market data is proxied through the local FastAPI service.</p></div></div><label className="setting-row"><span><strong>Refresh interval</strong><small>Automatically refresh the Solana feed.</small></span><select value={refreshSeconds} onChange={(event) => setRefreshSeconds(Number(event.target.value))}><option value={0}>Manual only</option><option value={30}>Every 30 seconds</option><option value={60}>Every minute</option><option value={300}>Every 5 minutes</option></select></label><div className="setting-row"><span><strong>Market data provider</strong><small>DexScreener · boosted token feed and pair metrics</small></span><span className="connected-status"><span />Public API</span></div></section>
+    <div className="settings-layout"><div className="settings-nav"><button className="settings-nav-active" onClick={() => document.getElementById('appearance-settings')?.scrollIntoView({ behavior: scrollBehavior })}><Palette size={15} />Appearance</button><button onClick={() => document.getElementById('market-settings')?.scrollIntoView({ behavior: scrollBehavior })}><Activity size={15} />Market data</button><button onClick={() => document.getElementById('research-settings')?.scrollIntoView({ behavior: scrollBehavior })}><LineChart size={15} />Research</button><button onClick={() => document.getElementById('provider-settings')?.scrollIntoView({ behavior: scrollBehavior })}><Sparkles size={15} />AI providers</button></div>
+      <div className="settings-main"><section className="panel settings-section" id="appearance-settings"><div className="settings-section-head"><div><h2>Interface & motion</h2><p>Personalize the workspace. Preferences are saved in this browser and do not change market data.</p></div></div>
+          <label className="setting-row"><span><strong>Accent color</strong><small>Changes surfaces, navigation, focus and primary actions.</small></span><span className="setting-select-preview"><span className="accent-preview" aria-hidden="true" /><select aria-label="Accent color" value={uiPreferences.accent} onChange={(event) => onUiPreferencesChange({ accent: event.target.value as UiPreferences['accent'] })}><option value="ice">Ice blue</option><option value="violet">Violet</option><option value="cyan">Cyan</option></select></span></label>
+          <label className="setting-row"><span><strong>Glass depth</strong><small>Adjust blur across the sidebar, panels and token window.</small></span><select aria-label="Glass depth" value={uiPreferences.glass} onChange={(event) => onUiPreferencesChange({ glass: event.target.value as UiPreferences['glass'] })}><option value="subtle">Subtle</option><option value="balanced">Balanced</option><option value="rich">Rich</option></select></label>
+          <label className="setting-row"><span><strong>Workspace density</strong><small>Choose between more breathing room or more visible rows.</small></span><select aria-label="Workspace density" value={uiPreferences.density} onChange={(event) => onUiPreferencesChange({ density: event.target.value as UiPreferences['density'] })}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+          <label className="setting-row"><span><strong>Motion</strong><small>Follow device accessibility settings, or choose full/reduced motion explicitly.</small></span><select aria-label="Motion preference" value={uiPreferences.motion} onChange={(event) => onUiPreferencesChange({ motion: event.target.value as UiPreferences['motion'] })}><option value="system">Follow device</option><option value="full">Full transitions</option><option value="reduced">Reduce transitions</option></select></label>
+        </section>
+        <section className="panel settings-section" id="market-settings"><div className="settings-section-head"><div><h2>Market data</h2><p>Public market data is proxied through the local FastAPI service.</p></div></div><label className="setting-row"><span><strong>Refresh interval</strong><small>Automatically refresh the Solana feed.</small></span><select value={refreshSeconds} onChange={(event) => setRefreshSeconds(Number(event.target.value))}><option value={0}>Manual only</option><option value={30}>Every 30 seconds</option><option value={60}>Every minute</option><option value={300}>Every 5 minutes</option></select></label><div className="setting-row"><span><strong>Market data provider</strong><small>DexScreener · boosted token feed and pair metrics</small></span><span className="connected-status"><span />Public API</span></div></section>
         <section className="panel settings-section" id="research-settings"><div className="settings-section-head"><div><h2>Research preferences</h2><p>Choose the default view for AI Brain and the trading lab. These controls do not change provider data.</p></div></div>
           <label className="setting-row"><span><strong>Default candle timeframe</strong><small>Used when opening a research workspace.</small></span><select value={preferences.timeframe} onChange={(event) => onPreferencesChange({ timeframe: event.target.value as ResearchTimeframe })}><option value="1m">1 minute</option><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label>
           <label className="setting-row setting-toggle"><span><strong>Beginner explanations</strong><small>Show a plain-language guide to patterns and indicators.</small></span><input type="checkbox" checked={preferences.beginnerMode} onChange={(event) => onPreferencesChange({ beginnerMode: event.target.checked })} /></label>
@@ -865,7 +915,7 @@ function SettingsPage({ refreshSeconds, setRefreshSeconds, preferences, onPrefer
   </>
 }
 
-function TokenDialog({ token, onClose, onToast, onOpenPaper }: { token: Token; onClose: () => void; onToast: (message: string) => void; onOpenPaper: () => void }) {
+function TokenDialog({ token, indicators, onClose, onToast, onOpenPaper }: { token: Token; indicators: ResearchPreferences; onClose: () => void; onToast: (message: string) => void; onOpenPaper: () => void }) {
   const [timeframe, setTimeframe] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('15m')
   const [coinTab, setCoinTab] = useState<'overview' | 'trade' | 'alerts'>('overview')
   const [portfolioValue, setPortfolioValue] = useState('10000')
@@ -967,7 +1017,7 @@ function TokenDialog({ token, onClose, onToast, onOpenPaper }: { token: Token; o
           <div className="coin-tabs"><button className={coinTab === 'overview' ? 'active' : ''} onClick={() => setCoinTab('overview')}>Overview</button><button className={coinTab === 'trade' ? 'active' : ''} onClick={() => setCoinTab('trade')}>Trade plan</button><button className={coinTab === 'alerts' ? 'active' : ''} onClick={() => setCoinTab('alerts')}>Alerts</button></div>
           <div className="chart-status"><span />Real candles</div>
         </div>
-        <RealPriceChart pairAddress={token.pairAddress} timeframe={chartTimeframe.timeframe} aggregate={chartTimeframe.aggregate} />
+        <RealPriceChart pairAddress={token.pairAddress} timeframe={chartTimeframe.timeframe} aggregate={chartTimeframe.aggregate} indicators={indicators} />
       </section>
 
       <aside className="coin-rail">

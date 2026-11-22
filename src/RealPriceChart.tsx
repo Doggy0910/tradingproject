@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart, type IChartApi } from 'lightweight-charts'
+import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart, type AutoscaleInfoProvider, type IChartApi } from 'lightweight-charts'
 import { TriangleAlert } from 'lucide-react'
 import type { Candle } from './marketAnalysis'
 import { useCandleHistory, type CandleHistoryState } from './useCandleHistory'
+
+const nonNegativeAutoscale: AutoscaleInfoProvider = (baseImplementation) => {
+  const info = baseImplementation()
+  if (!info?.priceRange) return info
+  return {
+    ...info,
+    priceRange: { ...info.priceRange, minValue: Math.max(0, info.priceRange.minValue) },
+  }
+}
 
 type Props = {
   pairAddress: string
@@ -20,6 +29,9 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
   const [legend, setLegend] = useState<Candle | null>(null)
   const fetchedHistory = useCandleHistory(sharedHistory ? '' : pairAddress, timeframe, aggregate)
   const { candles, loading, error } = sharedHistory ?? fetchedHistory
+  const intervalLabel = `${aggregate}${timeframe === 'minute' ? 'm' : timeframe === 'hour' ? 'h' : 'd'}`
+  const candleChange = legend ? legend.close - legend.open : null
+  const candleChangePct = legend?.open ? (legend.close / legend.open - 1) * 100 : null
 
   useEffect(() => {
     if (loading || error || !containerRef.current || candles.length === 0) return
@@ -38,13 +50,18 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
       layout: { background: { color: 'transparent' }, textColor: '#8793a1', fontFamily: 'Inter, SF Pro Text, Segoe UI, sans-serif', fontSize: 10 },
       grid: { vertLines: { color: 'rgba(255,255,255,0.025)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
       crosshair: { vertLine: { color: 'rgba(169,200,239,0.38)', width: 1, style: 2 }, horzLine: { color: 'rgba(169,200,239,0.32)', width: 1, style: 2 } },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.07)', scaleMargins: { top: 0.08, bottom: 0.24 } },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.07)', minimumWidth: 88, scaleMargins: { top: 0.06, bottom: 0 } },
       timeScale: { borderColor: 'rgba(255,255,255,0.07)', timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 7 },
       localization: { locale: 'en-US' },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     })
     chartRef.current = chart
+    const volumePane = chart.addPane()
+    chart.panes()[0].setStretchFactor(0.76)
+    volumePane.setStretchFactor(0.24)
+    const minPrice = Math.min(...candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close]))
+    const precision = Math.min(16, Math.max(2, Math.ceil(-Math.log10(minPrice)) + 2))
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#58c99a',
       downColor: '#e1838b',
@@ -54,6 +71,8 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
       wickDownColor: '#e1838b',
       priceLineVisible: true,
       lastValueVisible: true,
+      priceFormat: { type: 'price', precision, minMove: 10 ** -precision },
+      autoscaleInfoProvider: nonNegativeAutoscale,
     })
     series.setData(candles.map((candle) => ({
       time: candle.time as never,
@@ -62,6 +81,7 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
       low: candle.low,
       close: candle.close,
     })))
+    series.priceScale().applyOptions({ visible: true, minimumWidth: 88 })
     const addMovingAverage = (period: 20 | 50, color: string) => {
       if (candles.length < period) return
       let total = 0
@@ -89,8 +109,8 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
         const high = Math.max(...range.map((candle) => candle.high))
         const low = Math.min(...range.map((candle) => candle.low))
         for (const [price, title, color] of [
-          [high, '20-bar high', 'rgba(100, 210, 162, 0.72)'],
-          [low, '20-bar low', 'rgba(231, 131, 141, 0.72)'],
+          [high, '20H', 'rgba(100, 210, 162, 0.72)'],
+          [low, '20L', 'rgba(231, 131, 141, 0.72)'],
         ] as const) {
           series.createPriceLine({
             price,
@@ -105,11 +125,10 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
     }
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
       lastValueVisible: false,
       priceLineVisible: false,
-    })
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
+    }, 1)
+    volumeSeries.priceScale().applyOptions({ visible: true, minimumWidth: 64, scaleMargins: { top: 0.08, bottom: 0.08 } })
     volumeSeries.setData(candles
       .filter((candle) => candle.volume !== null)
       .map((candle) => ({
@@ -148,26 +167,61 @@ export default function RealPriceChart({ pairAddress, timeframe, aggregate, hist
       </div>}
       {!loading && error && <div className="real-chart-state real-chart-error"><TriangleAlert size={15} /><div><strong>History unavailable</strong><span>{error}</span></div></div>}
       {!loading && !error && legend && (
-        <div className="real-chart-legend">
-          <span>{new Date(legend.time * 1_000).toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-          <span>O <b>{formatPrice(legend.open)}</b></span>
-          <span>H <b>{formatPrice(legend.high)}</b></span>
-          <span>L <b>{formatPrice(legend.low)}</b></span>
-          <span>C <b>{formatPrice(legend.close)}</b></span>
-          {legend.volume !== null && <span>VOL <b>{new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(legend.volume)}</b></span>}
+      <div className="real-chart-legend" aria-label="Selected candle data">
+        <div className="real-chart-legend-heading">
+          <strong>PRICE · USD</strong>
+          <span>Selected candle · {formatCandleTime(legend.time)} · {intervalLabel}</span>
+        </div>
+        <div className="real-chart-legend-values">
+          <span title="Price at the start of this candle"><small>OPEN</small><b>{formatPrice(legend.open)}</b></span>
+          <span title="Highest price reached during this candle"><small>HIGH</small><b>{formatPrice(legend.high)}</b></span>
+          <span title="Lowest price reached during this candle"><small>LOW</small><b>{formatPrice(legend.low)}</b></span>
+          <span title="Price at the end of this candle"><small>CLOSE</small><b>{formatPrice(legend.close)}</b></span>
+          {candleChange !== null && candleChangePct !== null && <span className={candleChange >= 0 ? 'positive' : 'negative'} title="Close minus open; this is one candle, not the selected timeframe's total return">
+            <small>BAR CHANGE</small><b>{formatSignedPrice(candleChange)} · {formatSignedPercent(candleChangePct)}</b>
+          </span>}
+          {legend.volume !== null && <span title="Provider-reported volume for this candle"><small>VOLUME</small><b>{new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(legend.volume)}</b></span>}
+        </div>
         </div>
       )}
       {!loading && !error && <div className="real-chart-indicators" aria-label="Visible chart indicators">
-        {indicators?.showSma20 && count >= 20 && <span><i className="indicator-swatch sma20-swatch" />SMA 20</span>}
-        {indicators?.showSma50 && count >= 50 && <span><i className="indicator-swatch sma50-swatch" />SMA 50</span>}
-        {indicators?.showRangeLevels && count >= 20 && <span><i className="indicator-swatch range-swatch" />20-bar range</span>}
+      {indicators?.showSma20 && count >= 20 && <span title="Average of the last 20 candle closes; it follows past price and can lag"><i className="indicator-swatch sma20-swatch" />SMA 20 · 20-close average</span>}
+      {indicators?.showSma50 && count >= 50 && <span title="Average of the last 50 candle closes; it follows past price and can lag"><i className="indicator-swatch sma50-swatch" />SMA 50 · 50-close average</span>}
+      {indicators?.showRangeLevels && count >= 20 && <span title="Highest and lowest values in the previous 20 candles"><i className="indicator-swatch range-swatch" />Prior 20-candle high / low</span>}
       </div>}
+      {!loading && !error && candles.some((candle) => candle.volume !== null) && <span className="real-chart-volume-label">REPORTED VOLUME</span>}
       <div ref={containerRef} className="real-chart-canvas" />
-      {!loading && !error && <div className="real-chart-meta"><span>{count} candles · GeckoTerminal</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a></div>}
+      {!loading && !error && <div className="real-chart-meta">
+      <span>{count} candles · {intervalLabel} interval · {formatCandleTime(candles[0].time)} – {formatCandleTime(candles[candles.length - 1].time)} · GeckoTerminal</span>
+      <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
+      </div>}
+      {!loading && !error && <p className="real-chart-guide">
+      <span><i className="guide-up" /> Verde: cierre sobre apertura</span>
+      <span><i className="guide-down" /> Rojo: cierre bajo apertura</span>
+      <span>Mecha = máximo–mínimo</span>
+      <span>Volumen reportado; no indica compras netas. La última vela puede seguir abierta.</span>
+      </p>}
     </div>
   )
 }
 
 function formatPrice(value: number) {
-  return new Intl.NumberFormat('en-US', { maximumSignificantDigits: 7, useGrouping: false }).format(value)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumSignificantDigits: 7 }).format(value)
+}
+
+function formatSignedPrice(value: number) {
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${formatPrice(Math.abs(value))}`
+}
+
+function formatSignedPercent(value: number) {
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
+}
+
+function formatCandleTime(time: number) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(time * 1_000))
 }
