@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   color: #edf1f5;
-  background: #080a0d;
+  background: #030405;
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -12,7 +12,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
-html { min-height: 100vh; background: #080a0d; }
+html { min-height: 100vh; background: #030405; }
 body { min-height: 100vh; overflow-x: hidden; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }

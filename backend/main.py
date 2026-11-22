@@ -1,5 +1,6 @@
 import os
 import time
+import math
 from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,7 +47,8 @@ def number(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
 
@@ -63,6 +65,25 @@ def cache_get(key: str) -> Any | None:
     if entry:
         cache.pop(key, None)
     return None
+
+
+def select_best_pairs(tokens: list[Token]) -> list[Token]:
+    best_by_address: dict[str, Token] = {}
+    for token in tokens:
+        current = best_by_address.get(token.address)
+        rank = (
+            token.liquidityUsd is not None,
+            token.liquidityUsd if token.liquidityUsd is not None else -1,
+            token.volume24h if token.volume24h is not None else -1,
+        )
+        current_rank = (
+            current.liquidityUsd is not None,
+            current.liquidityUsd if current.liquidityUsd is not None else -1,
+            current.volume24h if current.volume24h is not None else -1,
+        ) if current else None
+        if current_rank is None or rank > current_rank:
+            best_by_address[token.address] = token
+    return list(best_by_address.values())
 
 
 async def provider_get(url: str, client: httpx.AsyncClient) -> Any:
@@ -204,6 +225,12 @@ async def market_tokens(limit: int = Query(default=100, ge=1, le=200)):
             txns24h=transactions,
         ))
 
-    result = {"tokens": [token.model_dump() for token in tokens], "source": "dexscreener", "updatedAt": int(time.time())}
+    tokens = select_best_pairs(tokens)
+    result = {
+        "tokens": [token.model_dump() for token in tokens],
+        "source": "dexscreener",
+        "pairSelection": "highest reported liquidity per token; 24h volume breaks ties",
+        "updatedAt": int(time.time()),
+    }
     cache[cache_key] = (time.monotonic(), result)
     return result
