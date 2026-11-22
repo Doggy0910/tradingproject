@@ -735,7 +735,15 @@ function TokenDialog({ token, onClose, onToast, onOpenPaper }: { token: Token; o
 }
 
 function LoadingRows() {
-  return <div className="loading-state"><div className="loading-mark"><LoaderCircle size={20} className="spin" /></div><strong>Connecting to market data</strong><span>Fetching the latest Solana pair metrics…</span></div>
+  return <div className="loading-state" role="status" aria-label="Connecting to market data">
+    <div className="loading-skeleton-rows" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, index) => <div className="loading-skeleton-row" key={index}>
+        <span className="loading-skeleton-token"><i /><i /></span><span /><span /><span />
+      </div>)}
+    </div>
+    <strong>Connecting to market data</strong>
+    <span>Fetching the latest Solana pair metrics…</span>
+  </div>
 }
 
 function EmptyState({ title, copy }: { title: string; copy: string }) {
